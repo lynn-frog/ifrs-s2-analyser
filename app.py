@@ -7,7 +7,7 @@ benchmarked against all IFRS S2 disclosure requirements.
 
 import streamlit as st
 import pdfplumber
-import anthropic
+from openai import OpenAI
 import pandas as pd
 import json
 import io
@@ -715,23 +715,25 @@ ANNUAL REPORT TEXT FOR {company_name.upper()}:
 
 
 def analyse_category(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     company_name: str,
     report_text: str,
     category: str,
     requirements: list,
 ) -> list[dict]:
-    """Call Claude to analyse one category of IFRS S2 requirements."""
+    """Call GPT to analyse one category of IFRS S2 requirements."""
     prompt = build_analysis_prompt(company_name, report_text, requirements, category)
 
-    response = client.messages.create(
-        model="claude-opus-4-5",
+    response = client.chat.completions.create(
+        model="gpt-4o",
         max_tokens=8000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
     )
 
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
 
     # Strip markdown code fences if present
     if raw.startswith("```"):
@@ -1034,9 +1036,9 @@ with st.sidebar:
     st.header("⚙️ Configuration")
 
     api_key = st.text_input(
-        "Anthropic API Key",
+        "OpenAI API Key",
         type="password",
-        help="Your Anthropic API key. Get one at console.anthropic.com",
+        help="Your OpenAI API key. Get one at platform.openai.com",
     )
 
     company_name = st.text_input(
@@ -1082,7 +1084,7 @@ run_analysis = st.button(
 )
 
 if not api_key:
-    st.info("👈 Enter your Anthropic API key in the sidebar to get started.")
+    st.info("👈 Enter your OpenAI API key in the sidebar to get started.")
 elif not company_name:
     st.info("👈 Enter the company name in the sidebar.")
 elif not uploaded_file:
@@ -1091,7 +1093,7 @@ elif not uploaded_file:
 # ── Run analysis ──────────────────────────────────────────────────────────────
 if run_analysis:
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = OpenAI(api_key=api_key)
 
         # Step 1: Extract PDF
         with st.status("Extracting text from PDF...", expanded=True) as status:
@@ -1178,10 +1180,13 @@ if run_analysis:
 
         st.caption("The Excel file contains a Summary sheet with statistics and a detailed Benchmark Analysis sheet with all findings, colour-coded by fulfillment status and materiality.")
 
-    except anthropic.AuthenticationError:
-        st.error("❌ Invalid API key. Please check your Anthropic API key in the sidebar.")
-    except anthropic.RateLimitError:
-        st.error("❌ Rate limit reached. Please wait a moment and try again.")
+    except Exception as e:
+        if "401" in str(e) or "authentication" in str(e).lower() or "api_key" in str(e).lower():
+            st.error("❌ Invalid API key. Please check your OpenAI API key in the sidebar.")
+        elif "429" in str(e) or "rate limit" in str(e).lower():
+            st.error("❌ Rate limit reached. Please wait a moment and try again.")
+        else:
+            raise
     except Exception as e:
         st.error(f"❌ An error occurred: {str(e)}")
         st.exception(e)
